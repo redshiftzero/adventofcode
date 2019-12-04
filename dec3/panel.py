@@ -1,10 +1,16 @@
-from typing import List
+from typing import List, Union
 
 
 class Point():
     def __init__(self, x: int, y: int):
         self.x = x
         self.y = y
+        self.num_steps = None  # Optional[int]
+
+    def __lt__(self, other):
+        if self.num_steps < other.num_steps:
+            return True
+        return False
 
     def __eq__(self, other) -> bool:
         if self.x == other.x and self.y == other.y:
@@ -27,6 +33,24 @@ class SparseGrid():
         self.path: str = path
         self.points: List = []
         self._construct_visited_points()
+
+    def __getitem__(self, p: Union[int, Point]):
+        # Allow fetching points by position in the path.
+        if isinstance(p, int):
+            return self.points[p]
+
+        # There can be multiple matches since the path may visit the
+        # same point multiple times. Since what we care about is the
+        # minimum num_steps point, we return that.
+        matches = []
+        for point in self.points:
+            if p == point:
+                matches.append(point)
+
+        if len(matches) != 0:
+            return min(matches)
+
+        raise KeyError('{} not found in SparseGrid'.format(p))
 
     def __repr__(self) -> str:
         return 'SparseGrid({})'.format(self.path)
@@ -51,19 +75,21 @@ class SparseGrid():
             point = Point(prev_x - 1, prev_y)
         elif direction == 'R':
             point = Point(prev_x + 1, prev_y)
-        else:
-            raise Exception("this is unreachable!")
+
         self.points.append(point)
         return point
 
     def _construct_visited_points(self):
         prev_point = STARTING_POINT
+        total_steps = 0
         for step in self.path:
             direction = step[0]
             num_moves = int(step[1:])
 
             while num_moves > 0:
+                total_steps += 1
                 point = self._add_point(direction, prev_point.x, prev_point.y)
+                point.num_steps = total_steps
                 num_moves -= 1
                 prev_point = point
 
@@ -92,8 +118,12 @@ if __name__ == '__main__':
     sparse_grid_1 = SparseGrid(wire_1)
     sparse_grid_2 = SparseGrid(wire_2)
 
-    intersecting_points = set(sparse_grid_1.points) & set(sparse_grid_2.points)
+    intersecting_points = list(set(sparse_grid_1.points) & set(sparse_grid_2.points))
 
     dists_to_start = [manhattan_distance(x, STARTING_POINT) for x in intersecting_points]
 
-    print(min(dists_to_start))
+    combined_steps = [sparse_grid_1[x].num_steps + sparse_grid_2[x].num_steps 
+                      for x in intersecting_points]
+
+    print('min manhattan distance: {}'.format(min(dists_to_start)))
+    print('fewest combined steps: {}'.format(min(combined_steps)))

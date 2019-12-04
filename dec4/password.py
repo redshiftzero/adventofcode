@@ -2,21 +2,27 @@
 def is_password_valid(value: int) -> bool:
     value_str = str(value)
 
+    freq_num = {}
+
     first_number = int(value_str[0])
-    two_digits_equal = False
+    freq_num[first_number] = 1
+
     for char in value_str[1:]:
         second_number = int(char)
-        if first_number < second_number:
-            first_number = second_number
-        elif first_number == second_number:
-            two_digits_equal = True
+
+        try:
+            freq_num[second_number] += 1
+        except KeyError:
+            freq_num[second_number] = 1
+
+        if first_number <= second_number:
             first_number = second_number
         else:
             return False
 
-    if not two_digits_equal:
+    if 2 not in freq_num.values():
         return False
-    
+
     return True
 
 

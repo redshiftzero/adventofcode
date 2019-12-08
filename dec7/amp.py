@@ -1,5 +1,7 @@
 import itertools
 import sys
+from threading import Thread
+from queue import Queue
 
 from typing import List, Optional
 
@@ -33,19 +35,19 @@ param_mode_dict = {
 
 
 class Computer():
-    def __init__(self, opcodes: List[int], inputs: List[int]):
+    def __init__(self, opcodes: List[int], identifier: str, inputs: Queue, outputs: Queue,
+                 phase_signal: int):
         self.opcodes = opcodes
+        self.identifier = identifier
         self.instruction_pointer = 0
         self.keep_running = True
-        self.inputs = inputs
-        self.input_generator = itertools.cycle(self.inputs)
-        self.outputs = []
+        self.inputs: Queue = inputs
+        self.outputs: Queue = outputs
+        self.phase_signal: Optional[int] = phase_signal
 
     def process(self) -> Optional[List]:
         while self.keep_running:
             self._process_instruction(self.instruction_pointer)
-        
-        return self.outputs
 
     def _process_instruction(self, index: int) -> Optional[List]:
         opcode = self.opcodes[index]
@@ -164,12 +166,16 @@ class Computer():
         return value
 
     def _input(self, index: int, modes: List[str]) -> None:
-        input_value = next(self.input_generator)
+        if self.phase_signal:
+            input_value = self.phase_signal
+            self.phase_signal = None
+        else:
+            input_value = self.inputs.get()
         self._write(index + 1, modes[0], input_value)
 
     def _output(self, index: int, modes: List[str]) -> None:
         value = self._read(index + 1, modes[0])
-        self.outputs.append(value)
+        self.outputs.put(value)
 
     def _arithmetic_opcode(self, index: int, operation: str, modes: List[str]) -> None:
         value_1 = self._read(index + 1, modes[0])
@@ -184,19 +190,17 @@ class Computer():
 
 
 class Amplifier():
-    def __init__(self, input_signal: Optional[int] = None):
-        if input_signal:
-            self.input_signal = input_signal
-        self.phase_signal = None  # int
+    def __init__(self, identifier: str, phase_signal: Optional[int] = None):
+        self.phase_signal = phase_signal
+        self.identifier = identifier
         self.next = None
 
-    def compute(self, program: List[int], program_inputs: List[int]) -> int:
-        computer = Computer(program, program_inputs)
-        output_signal = computer.process()
-        if len(output_signal) != 1:
-            raise Exception('incorrect number of outputs')
+    def compute(self, program: List[int], inputs: Queue, outputs: Queue) -> int:
+        self.computer = Computer(program.copy(), self.identifier, inputs, outputs, self.phase_signal)
+        self.computer.process()
 
-        return output_signal[0]
+    def reassign_input_queue(self, inputs: Queue) -> None:
+        self.computer.inputs = inputs
 
 
 class AmplificationCircuit():
@@ -204,19 +208,52 @@ class AmplificationCircuit():
         self.program = program
         self.head = None
 
-    def compute_output_signal(self, phase_settings: List[int]) -> int:
+    def compute_output_signal(self) -> int:
         temp = self.head
-        input_signals = [0]  # we only know one at the beginning
-        counter = 0
-        while temp:
-            temp.input_signal = input_signals[-1]
-            program_inputs = [phase_settings[counter], temp.input_signal]
-            output_signal = temp.compute(self.program, program_inputs)
-            input_signals.append(output_signal)
-            temp = temp.next
-            counter += 1
+        threads = {}
 
-        return output_signal
+        out_q = None
+        feedback_setup = False
+        # We only need to traverse the linked list once to setup the threads, queues, and
+        # start them all.
+        while temp and not feedback_setup:
+            try:
+                thread_temp = threads[temp.identifier]['thread']
+
+                # Connect the feedback loop
+                if temp.identifier == 'A' and not feedback_setup:
+                    out = threads['E']['out_q'].get()
+                    threads['A']['in_q'].put(out)
+                    threads['A']['in_q'] = threads['E']['out_q']
+                    temp.reassign_input_queue(threads['E']['out_q'])
+                    feedback_setup = True
+            except KeyError:
+                # Make the shared queues
+                in_q = Queue()
+
+                if out_q:  # Then this is not the first node
+                    in_q = out_q
+                    last_output = out_q.get()
+                    in_q.put(last_output)
+                else:  # This is the first node
+                    in_q.put(0)
+
+                out_q = Queue()
+
+                # Make the thread to run the intcode computer and set it running
+                threads[temp.identifier] = {
+                    'obj': temp,
+                    'in_q': in_q,
+                    'out_q': out_q,
+                    'thread': Thread(target = temp.compute, 
+                                     args=(self.program, in_q, out_q, ))
+                }
+                threads[temp.identifier]['thread'].start()
+            temp = temp.next
+
+        threads['E']['thread'].join()
+        output = threads['E']['out_q'].get()
+        return output
 
 
 if __name__=="__main__":
@@ -226,28 +263,32 @@ if __name__=="__main__":
     opcodes = [int(x) for x in opcodes]
 
     # test cases
-    #opcodes = [3,15,3,16,1002,16,10,16,1,16,15,15,4,15,99,0,0]
-    #opcodes = [3,23,3,24,1002,24,10,24,1002,23,-1,23,101,5,23,23,1,24,23,23,4,23,99,0,0]
-    #opcodes = [3,31,3,32,1002,32,10,32,1001,31,-2,31,1007,31,0,33,1002,33,7,33,1,33,31,31,1,32,31,31,4,31,99,0,0,0]
+    #opcodes = [3,26,1001,26,-4,26,3,27,1002,27,2,27,1,27,26,27,4,27,1001,28,-1,28,1005,28,6,99,0,0,5]
+    #opcodes = [3,52,1001,52,-5,52,3,53,1,52,56,54,1007,54,5,55,1005,55,26,1001,54,-5,54,1105,1,12,1,53,54,53,1008,54,0,55,1001,55,1,55,2,53,55,53,4,53,1001,56,-1,56,1005,56,6,99,0,0,0,0,10]
 
     max_thruster_signal = 0
     best_phase_order = []
-    for phase_order in list(itertools.permutations([0, 1, 2, 3, 4])):
+    for phase_order in list(itertools.permutations([9,8,7,6,5])):
         amp = AmplificationCircuit(opcodes)
-        amp_A = Amplifier()
+        amp_A = Amplifier('A', phase_order[0])
         amp.head = amp_A
 
-        amp_B = Amplifier()
-        amp_C = Amplifier()
-        amp_D = Amplifier()
-        amp_E = Amplifier()
+        # We'll run each amplifier's intcode computer in its own thread,
+        # and use queues between the links for inter-thread communication.
+        amp_B = Amplifier('B', phase_order[1])
+        amp_C = Amplifier('C', phase_order[2])
+        amp_D = Amplifier('D', phase_order[3])
+        amp_E = Amplifier('E', phase_order[4])
 
         amp_A.next = amp_B
+
         amp_B.next = amp_C
         amp_C.next = amp_D
         amp_D.next = amp_E
+        # Adds a feedback loop to the linked list
+        amp_E.next = amp_A
 
-        thruster_signal = amp.compute_output_signal(list(phase_order))
+        thruster_signal = amp.compute_output_signal()
 
         if thruster_signal > max_thruster_signal:
             max_thruster_signal = thruster_signal
@@ -255,7 +296,6 @@ if __name__=="__main__":
         
     print(max_thruster_signal)
     print(best_phase_order)
-
 
 
 

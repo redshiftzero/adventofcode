@@ -219,7 +219,10 @@ if __name__=="__main__":
 
     in_q = Queue()
     out_q = Queue()
-    computer = Computer(opcodes, in_q, out_q, 1)
+    # part 1
+    # computer = Computer(opcodes, in_q, out_q, 1)
+    # part 2
+    computer = Computer(opcodes, in_q, out_q, 2)
     computer.process()
     while not out_q.empty():
         print(out_q.get())

@@ -4,11 +4,12 @@ TARGET = 2020
 
 
 def find_result(nums: List[int]) -> Optional[int]:
-    # High efficiency quadratic time solution lol
+    # High efficiency cubics time solution lelz
     for x in nums:
         for y in nums:
-            if x + y == 2020:
-                return x * y
+            for z in nums:
+                if x + y + z == 2020:
+                    return x * y * z
 
 
 if __name__ == '__main__':

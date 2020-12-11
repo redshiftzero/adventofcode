@@ -10,8 +10,9 @@ def num_valid_passwords(min_freqs: List[int],
     ) -> int:
     num_valid = 0
     for ind, password in enumerate(passwords):
-        num_char = password.strip().count(chars[ind])
-        if num_char >= min_freqs[ind] and num_char <= max_freqs[ind]:
+        password = password.strip()
+        num_char = int(password[min_freqs[ind] - 1] == chars[ind]) + int(password[max_freqs[ind] - 1] == chars[ind])
+        if num_char == 1:
             num_valid += 1
     return num_valid
 
